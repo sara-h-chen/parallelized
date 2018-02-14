@@ -1,0 +1,2 @@
+CPU utilization is lower with multicore processing
+Average of about 60% CPU usage

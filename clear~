@@ -1,0 +1,15 @@
+#!/bin/bash
+# Clear everything
+
+echo "" > body_count_thousand_0.csv
+echo "" > body_count_thousand_1.csv
+echo "" > body_count_thousand_2.csv
+echo "" > body_count_ten_thousand_0.csv
+echo "" > body_count_ten_thousand_1.csv
+echo "" > body_count_ten_thousand_2.csv
+echo "" > results_thousand_0.csv 
+echo "" > results_thousand_1.csv 
+echo "" > results_thousand_2.csv 
+echo "" > results_ten_thousand_0.csv 
+echo "" > results_ten_thousand_1.csv 
+echo "" > results_ten_thousand_2.csv 
