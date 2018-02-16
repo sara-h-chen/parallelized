@@ -16,6 +16,7 @@
 #include <sstream>
 #include <iostream>
 #include <math.h>
+#include <string.h>
 #include <vector>
 #include <random>
 #include <algorithm>
@@ -38,15 +39,20 @@ const int seed = 1337;
 double t = 0;
 double tFinal = 0;
 double timeStepSize = 1e-5;
-bool adaptiveTimeStep = true;
+bool adaptiveTimeStep = false;
 
 int numberOfBodies = 0;
 int NumInactive = 0;
 
 Body *bodies;
 
+// For scaling the adaptive time step
+std::pair<Body, Body> closestPair;
+double closestDistance = std::numeric_limits<double>::max();
+
 // Prepare data structure to note collision
 std::map<Body*, Body*> collidedBodies;
+
 std::ofstream videoFile;
 std::ofstream bodyCountFile;
 
@@ -85,9 +91,16 @@ double calculateDistance(Body a, Body b) {
     );
 }
 
+// SAME = 0; NOT SAME = 1 
+// TRUE = 1; FALSE = 0
 void addToMap(Body *a, Body *b) {
+    // Only add if both bodies are not present in the map
     #pragma omp critical (Map)
-    if (!collidedBodies.count(a) && !collidedBodies.count(b)) {
+    if (((collidedBodies.find(a)->second) - b) && ((collidedBodies.find(b)->second) - a)) {
+	// DEBUG
+	// printf("A: %p\n",  (void *)collidedBodies.find(a)->second);
+	// printf("B: %p\n",  (void *)collidedBodies.find(b)->second);
+	// std::cout<< (collidedBodies.find(a)->second) - b << std::endl;
         collidedBodies.insert(std::make_pair(a,b));
     }
 }
@@ -144,7 +157,7 @@ void setUp(int argc, char **argv) {
 // ----------------------------------------------------
 
 void openParaviewVideoFile() {
-    videoFile.open("result.pvd");
+    videoFile.open("paraview/result.pvd");
     videoFile << "<?xml version=\"1.0\"?>" << std::endl
               << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\" compressor=\"vtkZLibDataCompressor\">"
               << std::endl
@@ -161,25 +174,33 @@ void closeParaviewVideoFile() {
  * The file format is documented at http://www.vtk.org/wp-content/uploads/2015/04/file-formats.pdf
  */
 void printParaviewSnapshot(int counter) {
+    // Count number of Active Bodies
+    int doCount = 0;
+    for (int i = 0; i < numberOfBodies; ++i) {
+        if(bodies[i].isActive) {
+	    doCount += 1;
+	}
+    }
+
     std::stringstream filename;
     filename << "paraview/result-" << counter << ".vtp";
     std::ofstream out(filename.str().c_str());
     out << "<VTKFile type=\"PolyData\" >" << std::endl
         << "<PolyData>" << std::endl
-        << " <Piece NumberOfPoints=\"" << numberOfBodies - NumInactive << "\">" << std::endl
+        << " <Piece NumberOfPoints=\"" << doCount << "\">" << std::endl
         << "  <Points>" << std::endl
-        << "   <DataArray type=\"Float32\" NumberOfComponents=\"3\" format=\"ascii\">";
+        << "   <DataArray type=\"Float32\" NumberOfComponents=\"3\" format=\"ascii\">\n";
 
+    out << std::fixed << std::setprecision(5); 
     for (int i = 0; i < numberOfBodies; ++i) {
-        if (!bodies[i].isActive) {
-            continue;
+        if (bodies[i].isActive) {
+            out << bodies[i].positionX
+                << " "
+                << bodies[i].positionY
+                << " "
+                << bodies[i].positionZ
+                << " \n";
         }
-        out << bodies[i].positionX
-            << " "
-            << bodies[i].positionY
-            << " "
-            << bodies[i].positionZ
-            << " ";
     }
 
     out << "   </DataArray>" << std::endl
@@ -226,6 +247,7 @@ void updatePosition() {
 
             bodies[i].positionX = bodies[i].positionX + (timeStepSize * bodies[i].velocityX) + (deltaT * accelerationX);
             bodies[i].positionY = bodies[i].positionY + (timeStepSize * bodies[i].velocityY) + (deltaT * accelerationY);
+	    printf("%.30f\n", bodies[i].positionY);
             bodies[i].positionZ = bodies[i].positionZ + (timeStepSize * bodies[i].velocityZ) + (deltaT * accelerationZ);
 
             bodies[i].velocityX = bodies[i].velocityX + (timeStepSize * accelerationX);
@@ -238,9 +260,9 @@ void updatePosition() {
             bodies[i].forceZ = 0;
 
             // DEBUG
-//            if (bodies[i].positionX >= 0.09 && bodies[i].positionX <= 0.10) {
-//                printf("\nBody %d: %7.8f  %7.8f  %7.8f", i, bodies[i].positionX, bodies[i].positionY, bodies[i].positionZ);
-//            }
+            // if (bodies[i].positionX >= 0.09 && bodies[i].positionX <= 0.10) {
+            //     printf("\nBody %d: %7.8f  %7.8f  %7.8f", i, bodies[i].positionX, bodies[i].positionY, bodies[i].positionZ);
+            // }
         }
     }
 }
@@ -257,14 +279,15 @@ double scaleTimeStep(Body a, Body b, double distance) {
 
             makeForecast(a, b, tempBodyA, tempBodyB);
             double expectedDistance = calculateDistance(tempBodyA, tempBodyB);
-//            printf("Expected distance : %7.8f \n", expectedDistance);
-//            printf("Scaled distance : %7.8f \n", distance);
+	    // DEBUG
+            // printf("Expected distance : %7.8f \n", expectedDistance);
+            // printf("Scaled distance : %7.8f \n", distance);
 
             // If they are getting closer together
             if (expectedDistance - distance < 0) {
                 // Check if they are within range of one another
                 while (withinRange) {
-                    if (newTimeStep <= 1e-12) {
+                    if (newTimeStep <= 1e-11) {
                         withinRange = false;
                     } else if (expectedDistance <= limit) {
                         withinRange = false;
@@ -281,30 +304,31 @@ double scaleTimeStep(Body a, Body b, double distance) {
 
 
 void fuseBodies(Body *a, Body *b) {
-    
-    double combinedMass = a->mass + b->mass;
-    double newVelX = ((a->mass * a->velocityX) + (b->mass * b->velocityX)) / combinedMass;
-    double newVelY = ((a->mass * a->velocityY) + (b->mass * b->velocityY)) / combinedMass;
-    double newVelZ = ((a->mass * a->velocityZ) + (b->mass * b->velocityZ)) / combinedMass;
+    if (a->isActive && b->isActive) {
+       double combinedMass = a->mass + b->mass;
+       double newVelX = ((a->mass * a->velocityX) + (b->mass * b->velocityX)) / combinedMass;
+       double newVelY = ((a->mass * a->velocityY) + (b->mass * b->velocityY)) / combinedMass;
+       double newVelZ = ((a->mass * a->velocityZ) + (b->mass * b->velocityZ)) / combinedMass;
 
-    // DEBUG
-    // printf("\n=====> Old body a: %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
-    // printf("\n=====> Old body b: %5.10f, %5.10f, %5.10f, %5.10f", b->mass, b->velocityX, b->velocityY, b->velocityZ);
+       // DEBUG
+       printf("\n=====> Old body a: %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
+       printf("\n=====> Old body b: %5.10f, %5.10f, %5.10f, %5.10f", b->mass, b->velocityX, b->velocityY, b->velocityZ);
 
-    a->mass = combinedMass;
-    a->velocityX = newVelX;
-    a->velocityY = newVelY;
-    a->velocityZ = newVelZ;
+        a->mass = combinedMass;
+        a->velocityX = newVelX;
+        a->velocityY = newVelY;
+        a->velocityZ = newVelZ;
 
-    // DEBUG
-    // printf("\n=====> New combined body : %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
+        // DEBUG
+        printf("\n=====> New combined body : %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
 
-    b->isActive = false;
-    NumInactive += 1;
+        b->isActive = false;
+        NumInactive += 1;
+    }
 }
 
 void addForce(Body *a, Body *b, double distance) {
-    double massDistance = a->mass * b->mass / (distance * distance * distance);
+    double massDistance = (a->mass * b->mass) / (distance * distance * distance);
     // Calculate the force between body and the others
     a->forceX += (b->positionX - a->positionX) * massDistance;
     a->forceY += (b->positionY - a->positionY) * massDistance;
@@ -325,14 +349,11 @@ void calculateEffect(int a_index, int b_index) {
 //        printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
 //    }
 
-
-    // Apply smallest time step to global
     if (adaptiveTimeStep) {
-        double thisTimeStep = scaleTimeStep(*a, *b, distance);
-        if (thisTimeStep < timeStepSize) {
-            #pragma omp critical (TimeStep)
-            timeStepSize = thisTimeStep;
-        }
+	if (distance < closestDistance) {
+	    closestDistance = distance;
+	    closestPair = std::make_pair(*a, *b);
+	}
     }
 
 //    if (adaptiveTimeStep) {
@@ -347,19 +368,21 @@ void calculateEffect(int a_index, int b_index) {
         addForce(a, b, distance);
         addForce(b, a, distance);
     } else {
+        // DEBUG
+        printf("\n -------------- Bodies %d and %d should collide with distance : %5.40f\n", a_index, b_index, distance);
         addToMap(a, b);
     } 
-        // DEBUG
-//        printf("\n -------------- Bodies %d and %d should collide with distance : %5.40f\n", a_index, b_index, distance);
-//        printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
-//        printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
+    // DEBUG
+    // printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
+    // printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
 }
 
 // Part 3: Make the time step change according to how close the bodies are to one another so that the particles don't just pass through each other
 void updateBodies() {
     
     // Step 1.1: All bodies interact and move
-    #pragma omp parallel for 
+    #pragma omp parallel
+    #pragma omp for nowait
     for (int i = 0; i < numberOfBodies; ++i) {
         if (bodies[i].isActive) {
             for (int j = i + 1; j < numberOfBodies; ++j) {
@@ -370,10 +393,14 @@ void updateBodies() {
         }
     }
 
+    // Continue with only one thread
+    if (adaptiveTimeStep) {	
+        timeStepSize = scaleTimeStep(closestPair.first, closestPair.second, closestDistance);
+	// DEBUG
+	// printf("Scaled time step: %.15f", timeStepSize);
+    }
     updatePosition();
 
-    // Continue with only one thread
-    // Ensures that a particle is not fused by a thread and another thread tries with the old copy of the particle
     for (auto const &x: collidedBodies) { 
         fuseBodies(x.first, x.second);
     }
@@ -381,6 +408,7 @@ void updateBodies() {
         
     // Increase time
     t += timeStepSize;
+    timeStepSize = defaultTime;
 }
 
 // ----------------------------------------------------
@@ -388,24 +416,23 @@ void updateBodies() {
 // ----------------------------------------------------
 
 void createRandomBodies(int noOfBodies) {
-    //std::random_device rd;
-    //std::default_random_engine e2(rd());
-    std::default_random_engine e2(seed);
-    std::uniform_real_distribution<> pos_dist(-0.1, 0.1);
-    std::uniform_real_distribution<> vel_dist(-10, 10);
-    std::uniform_real_distribution<> mass_dist(0, 1);
+    std::random_device rd;
+    std::default_random_engine e2(rd());
+    // std::default_random_engine e2(seed);
+    std::uniform_real_distribution<> pos_dist(-100, 100);
+    std::uniform_real_distribution<> vel_dist(0, 0);
+    std::uniform_real_distribution<> mass_dist(0, 0.05);
 
     bodies = new Body[noOfBodies];
 
-    #pragma omp parallel for
     for (int i = 0; i < noOfBodies; ++i) {   
         bodies[i].positionX = pos_dist(e2);
         bodies[i].positionY = pos_dist(e2);
         bodies[i].positionZ = pos_dist(e2);
 
-        bodies[i].velocityX = vel_dist(e2);
-        bodies[i].velocityY = vel_dist(e2);
-        bodies[i].velocityZ = vel_dist(e2);
+        bodies[i].velocityX = 0.0; 
+        bodies[i].velocityY = 0.0; 
+        bodies[i].velocityZ = 0.0;
 
         bodies[i].mass = mass_dist(e2);
         bodies[i].isActive = true;
@@ -415,7 +442,7 @@ void createRandomBodies(int noOfBodies) {
     }
 
     // DEBUG
-//    std::cout << "created random setup with " << noOfBodies << " bodies" << std::endl;
+    // std::cout << "created random setup with " << noOfBodies << " bodies" << std::endl;
 }
 
 
@@ -453,13 +480,10 @@ int main(int argc, char **argv) {
     clock_t tStart;
     tStart = clock();
 
-    // TODO: Remove later when not required
-    // Run smaller parallel simulation
-
     // Check if create bodies
     if(checkFlag(argv, argv + argc, "-r")) {
         // Set time step
-        tFinal = 1.0;
+        tFinal = 0.1;
 
         // Get number of bodies from command line
         char* cmdOption = getCmdOption(argv, argv + argc, "-r");
@@ -468,7 +492,7 @@ int main(int argc, char **argv) {
         
 	cmdOption = getCmdOption(argv, argv+argc, "-p");
         std::stringstream filename;
-        filename << "./test_collision_" << cmdOption << ".csv";
+        filename << "./scaling_plot_" << cmdOption << ".csv";
 	bodyCountFile.open(filename.str().c_str());
 
     } else {
@@ -521,8 +545,6 @@ int main(int argc, char **argv) {
             printParaviewSnapshot(currentTimeSteps/plotEveryKthStep);
         }
         updateBodies();
-
-        timeStepSize = defaultTime;
 	currentTimeSteps++;
     }
 
