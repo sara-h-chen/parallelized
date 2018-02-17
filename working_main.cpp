@@ -143,6 +143,10 @@ void setUp(int argc, char **argv) {
         readArgument++;
         bodies[i].isActive = true;
 
+	bodies[i].forceX = 0.0;
+	bodies[i].forceY = 0.0;
+	bodies[i].forceZ = 0.0;
+
         if (bodies[i].mass <= 0.0) {
             std::cerr << "invalid mass for body " << i << std::endl;
             exit(-2);
@@ -175,19 +179,19 @@ void closeParaviewVideoFile() {
  */
 void printParaviewSnapshot(int counter) {
     // Count number of Active Bodies
-    int doCount = 0;
-    for (int i = 0; i < numberOfBodies; ++i) {
-        if(bodies[i].isActive) {
-	    doCount += 1;
-	}
-    }
+    // int doCount = 0;
+    // for (int i = 0; i < numberOfBodies; ++i) {
+    //     if(bodies[i].isActive) {
+    //         doCount += 1;
+    //  }
+    // }
 
     std::stringstream filename;
     filename << "paraview/result-" << counter << ".vtp";
     std::ofstream out(filename.str().c_str());
     out << "<VTKFile type=\"PolyData\" >" << std::endl
         << "<PolyData>" << std::endl
-        << " <Piece NumberOfPoints=\"" << doCount << "\">" << std::endl
+        << " <Piece NumberOfPoints=\"" << (numberOfBodies - NumInactive) << "\">" << std::endl
         << "  <Points>" << std::endl
         << "   <DataArray type=\"Float32\" NumberOfComponents=\"3\" format=\"ascii\">\n";
 
@@ -247,7 +251,7 @@ void updatePosition() {
 
             bodies[i].positionX = bodies[i].positionX + (timeStepSize * bodies[i].velocityX) + (deltaT * accelerationX);
             bodies[i].positionY = bodies[i].positionY + (timeStepSize * bodies[i].velocityY) + (deltaT * accelerationY);
-	    printf("%.30f\n", bodies[i].positionY);
+	    // printf("y=%.30f, v=%f, dta=%f  \n", bodies[i].positionY, bodies[i].velocityY, deltaT * accelerationY);
             bodies[i].positionZ = bodies[i].positionZ + (timeStepSize * bodies[i].velocityZ) + (deltaT * accelerationZ);
 
             bodies[i].velocityX = bodies[i].velocityX + (timeStepSize * accelerationX);
@@ -311,8 +315,8 @@ void fuseBodies(Body *a, Body *b) {
        double newVelZ = ((a->mass * a->velocityZ) + (b->mass * b->velocityZ)) / combinedMass;
 
        // DEBUG
-       printf("\n=====> Old body a: %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
-       printf("\n=====> Old body b: %5.10f, %5.10f, %5.10f, %5.10f", b->mass, b->velocityX, b->velocityY, b->velocityZ);
+       // printf("\n=====> Old body a: %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
+       // printf("\n=====> Old body b: %5.10f, %5.10f, %5.10f, %5.10f", b->mass, b->velocityX, b->velocityY, b->velocityZ);
 
         a->mass = combinedMass;
         a->velocityX = newVelX;
@@ -320,7 +324,7 @@ void fuseBodies(Body *a, Body *b) {
         a->velocityZ = newVelZ;
 
         // DEBUG
-        printf("\n=====> New combined body : %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
+        // printf("\n=====> New combined body : %5.10f, %5.10f, %5.10f, %5.10f", a->mass, a->velocityX, a->velocityY, a->velocityZ);
 
         b->isActive = false;
         NumInactive += 1;
@@ -419,9 +423,9 @@ void createRandomBodies(int noOfBodies) {
     std::random_device rd;
     std::default_random_engine e2(rd());
     // std::default_random_engine e2(seed);
-    std::uniform_real_distribution<> pos_dist(-100, 100);
-    std::uniform_real_distribution<> vel_dist(0, 0);
-    std::uniform_real_distribution<> mass_dist(0, 0.05);
+    std::uniform_real_distribution<> pos_dist(-1.0, 1.0);
+    std::uniform_real_distribution<> vel_dist(0.5, 5);
+    std::uniform_real_distribution<> mass_dist(1, 15);
 
     bodies = new Body[noOfBodies];
 
@@ -436,6 +440,10 @@ void createRandomBodies(int noOfBodies) {
 
         bodies[i].mass = mass_dist(e2);
         bodies[i].isActive = true;
+
+	bodies[i].forceX = 0.0;
+	bodies[i].forceY = 0.0;
+	bodies[i].forceZ = 0.0;
 
 	// DEBUG
 	// printf("Body %d: %3.5f x, %3.5f y, %3.5f z", i, bodies[i].positionX, bodies[i].positionY, bodies[i].positionZ);
