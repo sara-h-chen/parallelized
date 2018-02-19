@@ -385,7 +385,7 @@ void calculateEffect(int a_index, int b_index) {
 void updateBodies() {
     
     // Step 1.1: All bodies interact and move
-    #pragma omp parallel
+    #pragma omp parallel 
     #pragma omp for nowait
     for (int i = 0; i < numberOfBodies; ++i) {
         if (bodies[i].isActive) {
@@ -423,7 +423,7 @@ void createRandomBodies(int noOfBodies) {
     std::random_device rd;
     std::default_random_engine e2(rd());
     // std::default_random_engine e2(seed);
-    std::uniform_real_distribution<> pos_dist(-1.0, 1.0);
+    std::uniform_real_distribution<> pos_dist(-0.5, 0.5);
     std::uniform_real_distribution<> vel_dist(0.5, 5);
     std::uniform_real_distribution<> mass_dist(1, 15);
 
@@ -482,8 +482,8 @@ char* getCmdOption(char** begin, char** end, const std::string &option)
 
 int main(int argc, char **argv) {
 
-    int nProcessors = omp_get_max_threads();
-    omp_set_num_threads(nProcessors);
+    // int nProcessors = omp_get_max_threads();
+    omp_set_num_threads(1);
 
     clock_t tStart;
     tStart = clock();
@@ -491,7 +491,7 @@ int main(int argc, char **argv) {
     // Check if create bodies
     if(checkFlag(argv, argv + argc, "-r")) {
         // Set time step
-        tFinal = 0.1;
+        tFinal = 0.2;
 
         // Get number of bodies from command line
         char* cmdOption = getCmdOption(argv, argv + argc, "-r");
@@ -530,8 +530,8 @@ int main(int argc, char **argv) {
         setUp(argc, argv);
     }
 
-    openParaviewVideoFile();
-    printParaviewSnapshot(0);
+    // openParaviewVideoFile();
+    // printParaviewSnapshot(0);
 
     int currentTimeSteps = 0;
     const int plotEveryKthStep = 100;
@@ -550,13 +550,13 @@ int main(int argc, char **argv) {
             // Print number of bodies
             bodyCountFile << "time units: " << t << ", timesteps: " << currentTimeSteps << " " << std::to_string(time_count) << ", bodies left: " << std::to_string(numberOfBodies - NumInactive) << std::endl;
 
-            printParaviewSnapshot(currentTimeSteps/plotEveryKthStep);
+            // printParaviewSnapshot(currentTimeSteps/plotEveryKthStep);
         }
         updateBodies();
 	currentTimeSteps++;
     }
 
-    closeParaviewVideoFile();
+    // closeParaviewVideoFile();
 
     tStart = clock() - tStart;
     double time_taken = ((double)tStart)/CLOCKS_PER_SEC;
