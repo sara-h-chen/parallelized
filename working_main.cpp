@@ -12,6 +12,8 @@
 //
 // (C) 2017 Tobias Weinzierl
 
+// NOTE: Please ignore any commented out DEBUG sections
+
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -31,6 +33,10 @@ struct Body {
     double forceX, forceY, forceZ;
     bool isActive;
 };
+
+// PART 1 CALCULATION
+// int shrinkTime = 64;
+// const double defaultTime = 1e-5 / shrinkTime;
 
 const double limit = 1e-10;
 const double defaultTime = 1e-5;
@@ -56,8 +62,6 @@ std::map<Body*, Body*> collidedBodies;
 std::ofstream videoFile;
 std::ofstream bodyCountFile;
 
-
-// TODO: Remove all debug statements and uncomment Paraview statements
 
 // ----------------------------------------------------
 //                  UTILITY FUNCTIONS
@@ -251,6 +255,7 @@ void updatePosition() {
 
             bodies[i].positionX = bodies[i].positionX + (timeStepSize * bodies[i].velocityX) + (deltaT * accelerationX);
             bodies[i].positionY = bodies[i].positionY + (timeStepSize * bodies[i].velocityY) + (deltaT * accelerationY);
+	    // DEBUG
 	    // printf("y=%.30f, v=%f, dta=%f  \n", bodies[i].positionY, bodies[i].velocityY, deltaT * accelerationY);
             bodies[i].positionZ = bodies[i].positionZ + (timeStepSize * bodies[i].velocityZ) + (deltaT * accelerationZ);
 
@@ -272,7 +277,7 @@ void updatePosition() {
 }
 
 double scaleTimeStep(Body a, Body b, double distance) {
-    // Begin breaking down
+    // Begin scaling down from initial value
     double newTimeStep = defaultTime;
 
     if (timeStepSize > limit) {
@@ -293,16 +298,20 @@ double scaleTimeStep(Body a, Body b, double distance) {
                 while (withinRange) {
                     if (newTimeStep <= 1e-11) {
                         withinRange = false;
+		    // Check if the distance is too small
                     } else if (expectedDistance <= limit) {
                         withinRange = false;
+		    // Check that they are moving closer together and not going too far
                     } else {
                         withinRange = (((expectedDistance - distance)/ distance) < 0.2);
                     }
-                    newTimeStep = newTimeStep / 10;
+                    newTimeStep = newTimeStep / 2;
                 }
             }
         }
     }
+    // DEBUG
+    // printf("Time step: %3.15f\n", newTimeStep);
     return newTimeStep;
 }
 
@@ -346,12 +355,13 @@ void calculateEffect(int a_index, int b_index) {
 
     // Current state
     double distance = calculateDistance(*a, *b);
+    
     // DEBUG
-//    if (distance < 1e-5) {
-//        printf("Distance: %7.64f \n", distance);
-//        printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
-//        printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
-//    }
+    // if (distance < 1e-5) {
+    //     printf("Small distance: %7.64f \n", distance);
+    //     printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
+    //     printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
+    // }
 
     if (adaptiveTimeStep) {
 	if (distance < closestDistance) {
@@ -360,30 +370,28 @@ void calculateEffect(int a_index, int b_index) {
 	}
     }
 
-//    if (adaptiveTimeStep) {
-//        timeStepSize = scaleTimeStep(*a, *b, distance);
-        // DEBUG
-//        if (distance <= 1e-8) {
-//            printf("adaptive time step: %7.30f ", timeStepSize);
-//        }
-//    }
-
     if (distance > 1e-8) {
         addForce(a, b, distance);
         addForce(b, a, distance);
     } else {
         // DEBUG
-        printf("\n -------------- Bodies %d and %d should collide with distance : %5.40f\n", a_index, b_index, distance);
+        // printf("\n -------------- Bodies %d and %d should collide with distance : %5.40f\n", a_index, b_index, distance);
         addToMap(a, b);
+        // DEBUG
+        // printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
+        // printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
+	// exit(-2);
     } 
-    // DEBUG
-    // printf("\nBody %d: %7.64f  %7.64f  %7.64f", a_index, bodies[a_index].positionX, bodies[a_index].positionY, bodies[a_index].positionZ);
-    // printf("\nBody %d: %7.64f  %7.64f  %7.64f", b_index, bodies[b_index].positionX, bodies[b_index].positionY, bodies[b_index].positionZ);
 }
 
 // Part 3: Make the time step change according to how close the bodies are to one another so that the particles don't just pass through each other
 void updateBodies() {
     
+    // Clock statements here are used to time the parallel
+    // and serial parts of the code
+    clock_t timeStart;
+    timeStart = clock();
+
     // Step 1.1: All bodies interact and move
     #pragma omp parallel 
     #pragma omp for nowait
@@ -397,14 +405,26 @@ void updateBodies() {
         }
     }
 
+    timeStart = clock() - timeStart;
+    double time_count = ((double)timeStart)/CLOCKS_PER_SEC;
+    // printf("Time taken for parallel force calculation: %5.15f", time_count);
+    timeStart = clock();
+    
     // Continue with only one thread
     if (adaptiveTimeStep) {	
         timeStepSize = scaleTimeStep(closestPair.first, closestPair.second, closestDistance);
 	// DEBUG
 	// printf("Scaled time step: %.15f", timeStepSize);
     }
+    
     updatePosition();
 
+    timeStart = clock() - timeStart;
+    time_count = ((double)timeStart)/CLOCKS_PER_SEC;
+    // printf("Time taken for parallel update: %5.15f", time_count);
+    timeStart = clock();
+
+    // Fuse the bodies serially to ensure that the process is threadsafe
     for (auto const &x: collidedBodies) { 
         fuseBodies(x.first, x.second);
     }
@@ -413,6 +433,8 @@ void updateBodies() {
     // Increase time
     t += timeStepSize;
     timeStepSize = defaultTime;
+    timeStart = clock() - timeStart;
+    time_count = ((double)timeStart)/CLOCKS_PER_SEC;
 }
 
 // ----------------------------------------------------
@@ -422,10 +444,14 @@ void updateBodies() {
 void createRandomBodies(int noOfBodies) {
     std::random_device rd;
     std::default_random_engine e2(rd());
+    // Seeded random number generator to test similarity between
+    // serial and parallel code
     // std::default_random_engine e2(seed);
-    std::uniform_real_distribution<> pos_dist(-0.5, 0.5);
-    std::uniform_real_distribution<> vel_dist(0.5, 5);
-    std::uniform_real_distribution<> mass_dist(1, 15);
+    
+    // Generate random numbers within this range
+    std::uniform_real_distribution<> pos_dist(-1e-3, 1e-3);
+    std::uniform_real_distribution<> vel_dist(-9, 9);
+    std::uniform_real_distribution<> mass_dist(1e-9, 1e-10);
 
     bodies = new Body[noOfBodies];
 
@@ -448,7 +474,6 @@ void createRandomBodies(int noOfBodies) {
 	// DEBUG
 	// printf("Body %d: %3.5f x, %3.5f y, %3.5f z", i, bodies[i].positionX, bodies[i].positionY, bodies[i].positionZ);
     }
-
     // DEBUG
     // std::cout << "created random setup with " << noOfBodies << " bodies" << std::endl;
 }
@@ -459,6 +484,7 @@ void createRandomBodies(int noOfBodies) {
 // ----------------------------------------------------
 //  If the -r flag is used, create random bodies.
 //  Must be followed by the number of bodies.
+//  The -p flag is to add a suffix to filenames.
 // ----------------------------------------------------
 
 bool checkFlag(char** begin, char** end, const std::string &option)
@@ -482,25 +508,28 @@ char* getCmdOption(char** begin, char** end, const std::string &option)
 
 int main(int argc, char **argv) {
 
+    // Set number of threads explicitly or maximize
     // int nProcessors = omp_get_max_threads();
-    omp_set_num_threads(1);
+    omp_set_num_threads(4);
 
     clock_t tStart;
     tStart = clock();
 
-    // Check if create bodies
+    // Check if to generate random bodies
     if(checkFlag(argv, argv + argc, "-r")) {
-        // Set time step
-        tFinal = 0.2;
+        // Set length of simulation 
+        tFinal = 0.1;
 
         // Get number of bodies from command line
         char* cmdOption = getCmdOption(argv, argv + argc, "-r");
         numberOfBodies = atoi(cmdOption);
         createRandomBodies(numberOfBodies);
         
+	// Get suffix for file to output checkpoints containing
+	// time steps taken, bodies, clock time
 	cmdOption = getCmdOption(argv, argv+argc, "-p");
         std::stringstream filename;
-        filename << "./scaling_plot_" << cmdOption << ".csv";
+        filename << "./amdahl_" << cmdOption << ".csv";
 	bodyCountFile.open(filename.str().c_str());
 
     } else {
@@ -519,45 +548,48 @@ int main(int argc, char **argv) {
                       << std::endl;
             return -1;
         }
-            // Mismatched args
+        // Mismatched args
         else if ((argc - 2) % 7 != 0) {
             std::cerr << "error in arguments: each planet is given by seven entries (position, velocity, mass)"
                       << std::endl;
             return -2;
         }
 
-	bodyCountFile.open("test_nowait.csv");
+	// DEBUG
+	bodyCountFile.open("calc.csv");
         setUp(argc, argv);
     }
 
+    // UNCOMMENT TO PRINT PARAVIEW FILES
     // openParaviewVideoFile();
     // printParaviewSnapshot(0);
 
     int currentTimeSteps = 0;
     const int plotEveryKthStep = 100;
-    // OpenMP keeps pools of threads alive for a bit so if generating random bodies;
-    // new threads may not be spawned
     while (t <= tFinal) {
          if (currentTimeSteps % plotEveryKthStep == 0) {
 
             // DEBUG
-//             std::cout << "Going into snapshot " << currentTimeSteps/plotEveryKthStep << std::endl;
+            // std::cout << "Going into snapshot " << currentTimeSteps/plotEveryKthStep << std::endl;
 
 	    clock_t tTime;
 	    tTime = clock();
 	    tTime = clock() - tStart;
 	    double time_count = ((double)tTime)/CLOCKS_PER_SEC;
-            // Print number of bodies
+            // Print time steps, clock time, no. of bodies to file ending with -p arg
             bodyCountFile << "time units: " << t << ", timesteps: " << currentTimeSteps << " " << std::to_string(time_count) << ", bodies left: " << std::to_string(numberOfBodies - NumInactive) << std::endl;
 
+	    // UNCOMMENT TO PRINT PARAVIEW FILES
             // printParaviewSnapshot(currentTimeSteps/plotEveryKthStep);
         }
         updateBodies();
 	currentTimeSteps++;
     }
 
+    // UNCOMMENT TO PRINT PARAVIEW FILES
     // closeParaviewVideoFile();
 
+    // Print time taken to run entire simulation
     tStart = clock() - tStart;
     double time_taken = ((double)tStart)/CLOCKS_PER_SEC;
     printf("Time taken: %f \n", time_taken);
